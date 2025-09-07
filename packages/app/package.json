@@ -7,21 +7,29 @@
     "*.css"
   ],
   "dependencies": {
+    "@ai-sdk/react": "^1.0.6",
     "@my/ui": "0.0.1",
     "@react-navigation/native": "^6.1.17",
+    "@supabase/supabase-js": "^2.47.10",
     "@tamagui/animations-react-native": "^1.132.18",
     "@tamagui/colors": "^1.132.18",
     "@tamagui/font-inter": "^1.132.18",
     "@tamagui/lucide-icons": "^1.132.18",
     "@tamagui/shorthands": "^1.132.18",
     "@tamagui/themes": "^1.132.18",
+    "ai": "^4.0.32",
     "burnt": "^0.12.2",
     "expo-constants": "~17.1.6",
     "expo-linking": "~7.1.4",
+    "lodash": "^4.17.21",
+    "react-native-mmkv": "^3.2.1",
     "react-native-safe-area-context": "5.4.0",
-    "solito": "^4.2.2"
+    "react-native-url-polyfill": "^2.0.0",
+    "solito": "^4.2.2",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/lodash": "^4.17.13",
     "@types/react": "~19.0.10",
     "@types/react-native": "^0.73.0"
   }

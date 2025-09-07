@@ -1,0 +1,213 @@
+/* Light streak animation for chat input */
+.light-streak {
+  position: relative;
+  overflow: hidden;
+}
+
+.light-streak::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border-radius: inherit;
+  background: linear-gradient(
+    45deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 70%
+  );
+  background-size: 200% 200%;
+  animation: light-streak-move 8s linear infinite;
+  z-index: -1;
+  pointer-events: none;
+}
+
+@keyframes light-streak-move {
+  0% {
+    background-position: -200% -200%;
+  }
+  25% {
+    background-position: 200% -200%;
+  }
+  50% {
+    background-position: 200% 200%;
+  }
+  75% {
+    background-position: -200% 200%;
+  }
+  100% {
+    background-position: -200% -200%;
+  }
+}
+
+/* Alternative smoother circular animation */
+.light-streak-circular {
+  position: relative;
+  overflow: hidden;
+}
+
+.light-streak-circular::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  right: -3px;
+  bottom: -3px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 60deg,
+    rgba(255, 255, 255, 0.4) 120deg,
+    rgba(255, 255, 255, 0.6) 180deg,
+    rgba(255, 255, 255, 0.4) 240deg,
+    transparent 300deg,
+    transparent 360deg
+  );
+  animation: light-streak-rotate 12s linear infinite;
+  z-index: -1;
+  pointer-events: none;
+}
+
+@keyframes light-streak-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Make sure the keyframes are global */
+@-webkit-keyframes light-streak-rotate {
+  0% {
+    -webkit-transform: rotate(0deg);
+    transform: rotate(0deg);
+  }
+  100% {
+    -webkit-transform: rotate(360deg);
+    transform: rotate(360deg);
+  }
+}
+
+/* CSS Variables for light streak customization */
+:root {
+  --light-streak-speed: 20s; /* Adjustable speed - increase for slower (e.g., 30s, 45s) */
+}
+
+/* Simple spin animation */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 
+  To adjust the speed, change the --light-streak-speed value:
+  - Very slow: 30s or higher
+  - Slow: 20s (current)
+  - Medium: 12s
+  - Fast: 8s
+  - Very fast: 5s
+*/
+
+/* Light streak moving around border path */
+@keyframes light-streak-path {
+  0% {
+    top: -1px;
+    left: -60px;
+    transform: rotate(0deg);
+    opacity: 1;
+  }
+  24% {
+    top: -1px;
+    left: calc(100% + 0px);
+    transform: rotate(0deg);
+    opacity: 1;
+  }
+  25% {
+    top: -30px;
+    left: calc(100% + 1px);
+    transform: rotate(90deg);
+    opacity: 0.7;
+  }
+  49% {
+    top: calc(100% + 0px);
+    left: calc(100% + 1px);
+    transform: rotate(90deg);
+    opacity: 1;
+  }
+  50% {
+    top: calc(100% + 1px);
+    left: calc(100% + 60px);
+    transform: rotate(180deg);
+    opacity: 0.7;
+  }
+  74% {
+    top: calc(100% + 1px);
+    left: -60px;
+    transform: rotate(180deg);
+    opacity: 1;
+  }
+  75% {
+    top: calc(100% + 30px);
+    left: -1px;
+    transform: rotate(270deg);
+    opacity: 0.7;
+  }
+  99% {
+    top: -60px;
+    left: -1px;
+    transform: rotate(270deg);
+    opacity: 1;
+  }
+  100% {
+    top: -1px;
+    left: -60px;
+    transform: rotate(0deg);
+    opacity: 1;
+  }
+}
+
+/* Gradient-based animation for better compatibility */
+@keyframes light-streak-gradient {
+  0% {
+    background-position: -200% -200%;
+  }
+  25% {
+    background-position: 200% -200%;
+  }
+  50% {
+    background-position: 200% 200%;
+  }
+  75% {
+    background-position: -200% 200%;
+  }
+  100% {
+    background-position: -200% -200%;
+  }
+}
+
+/* Border-based animation for better compatibility */
+@keyframes light-streak-border {
+  0% {
+    border-image-source: linear-gradient(0deg, transparent, rgba(255,255,255,0.6), transparent);
+  }
+  25% {
+    border-image-source: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+  }
+  50% {
+    border-image-source: linear-gradient(180deg, transparent, rgba(255,255,255,0.6), transparent);
+  }
+  75% {
+    border-image-source: linear-gradient(270deg, transparent, rgba(255,255,255,0.6), transparent);
+  }
+  100% {
+    border-image-source: linear-gradient(360deg, transparent, rgba(255,255,255,0.6), transparent);
+  }
+}
