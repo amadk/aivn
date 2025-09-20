@@ -41,6 +41,7 @@ module.exports = () => {
       'expo-linking',
       'expo-constants',
       'expo-modules-core',
+      'react-native-markdown-display',
     ],
     experimental: {
       scrollRestoration: true,

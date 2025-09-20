@@ -21,6 +21,8 @@
     "upgrade:tamagui": "yarn up '*tamagui*'@latest '@tamagui/*'@latest",
     "upgrade:tamagui:canary": "yarn up '*tamagui*'@canary '@tamagui/*'@canary",
     "check-tamagui": "tamagui check",
+    "deploy:msg": "git add . && git commit -m \"$*\" && git pull origin main && git push origin main",
+    "deploy:ai": "git add . && oco --yes && git pull origin main && git push origin main",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare": "husky"

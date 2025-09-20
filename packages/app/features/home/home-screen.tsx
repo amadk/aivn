@@ -1,969 +1,955 @@
-import {
-  Anchor,
-  Button,
-  Center,
-  Div,
-  H1,
-  Paragraph,
-  Separator,
-  Sheet,
-  SwitchRouterButton,
-  SwitchThemeButton,
-  useToastController,
-  XStack,
-  YStack,
-  Input,
-  Text,
-  Form,
-  Flex,
-  isWeb,
-  SizableText,
-  AnimatePresence,
-} from '@my/ui'
-import { DraggableIframe } from 'app/components/DraggableIframe'
-import {
-  ChevronDown,
-  ChevronUp,
-  Send,
-  Bot,
-  User,
-  Camera,
-  X,
-  MessageCircle,
-  Settings,
-  History,
-  Plus,
-  Maximize2,
-  Minimize2,
-  Grid3x3,
-  Laptop2,
-  Monitor,
-  ChevronLeft,
-  ChevronRight,
-} from '@tamagui/lucide-icons'
+import { Button, Center, XStack, YStack, Text, isWeb } from '@my/ui'
+import { ChevronLeft, ChevronRight, Bot, User, BookOpen, X } from '@tamagui/lucide-icons'
 import { useEffect, useRef, useState } from 'react'
-import { Platform, FlatList, useColorScheme, Image } from 'react-native'
-import { useLink, usePathname, useRouter } from 'solito/navigation'
+import { useColorScheme, Image, ScrollView } from 'react-native'
+import { useRouter } from 'solito/navigation'
 import { useChat } from '@ai-sdk/react'
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai'
+import { DefaultChatTransport } from 'ai'
 import { ChatInput } from './components/chat-input'
-import { MessagePart } from './components/message-parts'
+import { ThemeToggle } from '../visual-novel/components/theme-toggle'
+import { SlideshowImage as BaseSlideshowImage } from 'app/components/slideshow'
 
-interface ChatTab {
-  id: string
-  title: string
-  messages: any[]
-  input: string
+// Extended interface to link images with messages
+interface SlideshowImage extends BaseSlideshowImage {
+  messageIndex?: number
 }
+import { MarkdownUI } from 'app/components/markdown-ui'
 
-interface IframeWindow {
-  id: string
-  filename: string
-  content: string
-  title: string
-  width: number
-  height: number
-  position: { x: number; y: number }
-}
+interface HomeScreenProps {}
 
-interface Space {
-  id: string
-  name: string
-  iframeWindows: IframeWindow[]
-}
-
-interface HomeScreenProps {
-  spaceId?: string
-}
-
-export function HomeScreen({ spaceId }: HomeScreenProps) {
+export function HomeScreen({}: HomeScreenProps) {
   const router = useRouter()
-
-  const [isMessagesVisible, setIsMessagesVisible] = useState(false)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [activeTabId, setActiveTabId] = useState('chat-1')
-  const [chatTabs, setChatTabs] = useState<ChatTab[]>([
-    { id: 'chat-1', title: 'Chat 1', messages: [], input: '' },
-  ])
-  const [iframeWindows, setIframeWindows] = useState<IframeWindow[]>([])
   const colorScheme = useColorScheme()
-  const isUpdatingMessagesRef = useRef(false)
 
-  // Initialize default space ID from URL or default to 'space-1'
-  const defaultSpaceId = spaceId || 'space-1'
+  // State for slideshow images
+  const [slideshowImages, setSlideshowImages] = useState<SlideshowImage[]>([])
 
-  // Space state management
-  const [spaces, setSpaces] = useState<Space[]>(() => {
-    // Load spaces from localStorage on web
-    if (isWeb && typeof window !== 'undefined') {
-      const savedSpaces = localStorage.getItem('aios_spaces')
-      if (savedSpaces) {
-        try {
-          return JSON.parse(savedSpaces)
-        } catch (e) {
-          console.error('Failed to parse saved spaces:', e)
-        }
-      }
-    }
-    return [{ id: 'space-1', name: 'space-1', iframeWindows: [] }]
-  })
-  const [showSpaceSwitcher, setShowSpaceSwitcher] = useState(false)
+  // State for synchronized message and image slides
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0)
+  const [input, setInput] = useState('')
+  const [showCustomInput, setShowCustomInput] = useState(false)
+  const [showDebugInfo, setShowDebugInfo] = useState(true)
 
-  // Save spaces to localStorage whenever they change
-  useEffect(() => {
-    if (isWeb && typeof window !== 'undefined') {
-      localStorage.setItem('aios_spaces', JSON.stringify(spaces))
-    }
-  }, [spaces])
-
-  // Get active space ID from URL parameter
-  const activeSpaceId = spaceId || spaces[0]?.id || 'space-1'
-
-  // Get current active tab
-  const activeTab = chatTabs.find((tab) => tab.id === activeTabId) || chatTabs[0]
-
-  // Ensure the space from URL exists in our spaces array
-  useEffect(() => {
-    if (activeSpaceId && !spaces.find((s) => s.id === activeSpaceId)) {
-      // Create the space if it doesn't exist
-      setSpaces((prev) => [
-        ...prev,
-        {
-          id: activeSpaceId,
-          name: activeSpaceId,
-          iframeWindows: [],
-        },
-      ])
-    }
-  }, [activeSpaceId])
-
-  // Set initial space in URL if not present
-  useEffect(() => {
-    if (!spaceId && isWeb) {
-      // No space in URL, redirect to default space
-      router.replace(`/?space=${spaces[0]?.id || 'space-1'}`)
-    }
-  }, [spaceId, spaces, router])
-
-  // Get current active space
-  const activeSpace = spaces.find((space) => space.id === activeSpaceId) || spaces[0]
-
-  const { messages, sendMessage, status, setMessages, error } = useChat({
+  const { messages, sendMessage, status, error } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
-      // body: { model: 'openai/gpt-4o' },
       body: { model: 'anthropic/claude-4-sonnet' },
     }),
+    experimental_throttle: 400,
     onFinish: (data) => {
-      console.log('onfinish', data)
-    },
-    onData: (data) => {
-      console.log('onfinish', data)
-    },
-    onToolCall: ({ toolCall }) => {
-      createIframeWindow({ ...(toolCall?.input ?? {}), id: `iframe-${Date.now()}` })
+      console.log('onFinish called with:', data)
+      // Check for image prompts in the finished message and generate images
+      if (data.message?.parts) {
+        const messageText = data.message.parts
+          .filter((p) => p.type === 'text')
+          .map((p) => (p as any).text)
+          .join('')
+        console.log('Message text:', messageText)
+        const structuredContent = parseStructuredResponse(messageText)
+        console.log('Structured content:', structuredContent)
+        if (structuredContent?.imagePrompt) {
+          console.log('Found image prompt, generating image:', structuredContent.imagePrompt)
+          generateImageFromPrompt(structuredContent.imagePrompt)
+        } else {
+          console.log('No image prompt found in structured content')
+        }
+      }
+
+      // Auto-advance to the newest message/slide
+      if (messages.length > 0) {
+        setCurrentSlideIndex(messages.length - 1)
+      }
     },
   })
 
-  // console.log('error', error)
-
-  // Update messages when switching tabs
-  useEffect(() => {
-    isUpdatingMessagesRef.current = true
-    setMessages(activeTab.messages)
-    // Use setTimeout to reset the flag after the update completes
-    setTimeout(() => {
-      isUpdatingMessagesRef.current = false
-    }, 0)
-  }, [activeTabId, setMessages])
-
-  // console.log('messages', JSON.stringify(messages, null, 2))
-  // Tab management functions
-  const createNewTab = () => {
-    const newTabId = `chat-${Date.now()}`
-    const newTab: ChatTab = {
-      id: newTabId,
-      title: `Chat ${chatTabs.length + 1}`,
-      messages: [],
-      input: '',
-    }
-    setChatTabs((prev) => [...prev, newTab])
-    setActiveTabId(newTabId)
-  }
-
-  const closeTab = (tabId: string) => {
-    if (chatTabs.length <= 1) return // Don't close the last tab
-
-    setChatTabs((prev) => prev.filter((tab) => tab.id !== tabId))
-
-    // If we're closing the active tab, switch to another tab
-    if (activeTabId === tabId) {
-      const remainingTabs = chatTabs.filter((tab) => tab.id !== tabId)
-      setActiveTabId(remainingTabs[0]?.id || '')
-    }
-  }
-
-  const switchTab = (tabId: string) => {
-    // Save current input to the current tab before switching
-    setChatTabs((prev) =>
-      prev.map((tab) =>
-        tab.id === activeTabId ? { ...tab, input: activeTab.input, messages: messages } : tab
-      )
-    )
-    setActiveTabId(tabId)
-  }
-
+  // Handle form submission
   const handleSubmit = (e: any) => {
     e.preventDefault()
-    if (activeTab.input.trim()) {
-      sendMessage({ text: activeTab.input })
-      // Update the tab's input
-      setChatTabs((prev) =>
-        prev.map((tab) => (tab.id === activeTabId ? { ...tab, input: '' } : tab))
-      )
+    if (input.trim()) {
+      sendMessage({ text: input })
+      setInput('')
     }
   }
 
-  const updateTabInput = (value: string) => {
-    setChatTabs((prev) =>
-      prev.map((tab) => (tab.id === activeTabId ? { ...tab, input: value } : tab))
-    )
+  // Test function to manually trigger image generation
+  const testImageGeneration = () => {
+    console.log('Testing image generation...')
+    generateImageFromPrompt('A beautiful anime girl with long flowing hair in a visual novel style')
   }
 
-  const toggleFullscreen = () => {
-    setIsFullscreen((prev) => !prev)
-    // Ensure messages are visible when entering fullscreen
-    if (!isFullscreen) {
-      setIsMessagesVisible(true)
+  // Navigation functions for synchronized slides
+  const goToPreviousSlide = () => {
+    if (currentSlideIndex > 0) {
+      setCurrentSlideIndex(currentSlideIndex - 1)
     }
   }
 
-  // Iframe management functions
-  const createIframeWindow = (iframeData) => {
-    setSpaces((prev) =>
-      prev.map((space) =>
-        space.id === activeSpaceId
-          ? { ...space, iframeWindows: [...space.iframeWindows, iframeData] }
-          : space
-      )
-    )
-  }
-
-  const closeIframeWindow = (id: string) => {
-    setSpaces((prev) =>
-      prev.map((space) =>
-        space.id === activeSpaceId
-          ? {
-              ...space,
-              iframeWindows: space.iframeWindows.filter((iframe) => iframe.id !== id),
-            }
-          : space
-      )
-    )
-  }
-
-  // Helper function to update URL with space parameter
-  const navigateToSpace = (spaceId: string) => {
-    // Solito's router works the same way on both platforms
-    router.push(`/?space=${spaceId}`)
-  }
-
-  // Space management functions
-  const createNewSpace = () => {
-    const timestamp = Date.now()
-    const newSpaceId = `space-${timestamp}`
-    const newSpace: Space = {
-      id: newSpaceId,
-      name: newSpaceId, // Use the ID as the name
-      iframeWindows: [],
-    }
-    setSpaces((prev) => [...prev, newSpace])
-    navigateToSpace(newSpaceId)
-  }
-
-  const switchSpace = (spaceId: string) => {
-    if (spaceId !== activeSpaceId) {
-      navigateToSpace(spaceId)
-    }
-    setShowSpaceSwitcher(false)
-  }
-
-  const closeSpace = (spaceId: string) => {
-    if (spaces.length <= 1) return // Don't close the last space
-
-    setSpaces((prev) => prev.filter((space) => space.id !== spaceId))
-
-    // If we're closing the active space, switch to another space
-    if (activeSpaceId === spaceId) {
-      const remainingSpaces = spaces.filter((space) => space.id !== spaceId)
-      navigateToSpace(remainingSpaces[0]?.id || 'space-1')
+  const goToNextSlide = () => {
+    const maxIndex = Math.max(messages.length - 1, slideshowImages.length - 1)
+    if (currentSlideIndex < maxIndex) {
+      setCurrentSlideIndex(currentSlideIndex + 1)
     }
   }
 
-  // Navigation helpers
-  const goToPreviousSpace = () => {
-    const currentIndex = spaces.findIndex((s) => s.id === activeSpaceId)
-    if (currentIndex > 0) {
-      navigateToSpace(spaces[currentIndex - 1].id)
-    }
-  }
-
-  const goToNextSpace = () => {
-    const currentIndex = spaces.findIndex((s) => s.id === activeSpaceId)
-    if (currentIndex < spaces.length - 1) {
-      navigateToSpace(spaces[currentIndex + 1].id)
-    }
-  }
-
-  // Keyboard shortcuts for space switching
-  useEffect(() => {
-    if (!isWeb) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Cmd/Ctrl + Left/Right arrow to switch spaces
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        e.preventDefault()
-        if (e.key === 'ArrowLeft') {
-          goToPreviousSpace()
-        } else {
-          goToNextSpace()
-        }
+  // Helper function to parse structured response from AI
+  const parseStructuredResponse = (text: string) => {
+    try {
+      // Look for JSON code block
+      const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/)
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[1])
       }
 
-      // Cmd/Ctrl + Number to switch to specific space
-      if ((e.metaKey || e.ctrlKey) && e.key >= '1' && e.key <= '9') {
-        e.preventDefault()
-        const spaceIndex = parseInt(e.key) - 1
-        if (spaceIndex < spaces.length) {
-          navigateToSpace(spaces[spaceIndex].id)
-        }
-      }
+      // Try to parse as direct JSON
+      return JSON.parse(text)
+    } catch (error) {
+      console.error('Failed to parse structured response:', error)
+      return null
+    }
+  }
 
-      // F3 or Mission Control key to show space switcher
-      if (e.key === 'F3' || (e.metaKey && e.key === 'ArrowUp')) {
-        e.preventDefault()
-        setShowSpaceSwitcher((prev) => !prev)
-      }
+  // Image generation function
+  const generateImageFromPrompt = async (prompt: string) => {
+    const imageId = `img-${Date.now()}`
+
+    console.log('Generating image for prompt:', prompt)
+    console.log('Current messages length:', messages.length)
+
+    // Add loading image to slideshow - use messages.length as the index since the new message will be at that position
+    const loadingImage: SlideshowImage = {
+      id: imageId,
+      url: '',
+      prompt,
+      timestamp: new Date().toISOString(),
+      isLoading: true,
+      messageIndex: messages.length, // Link to the new message that will be added
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [spaces, activeSpaceId, goToPreviousSpace, goToNextSpace, navigateToSpace])
+    // Just append the image to the array for now - we'll fix indexing later
+    setSlideshowImages((prev) => {
+      const newImages = [...prev, loadingImage]
+      console.log('Added image to slideshow, total images:', newImages.length)
+      return newImages
+    })
 
-  // Update messages in the current tab when they change (but not when we're switching tabs)
-  // useEffect(() => {
-  //   if (!isUpdatingMessagesRef.current) {
-  //     setChatTabs((prev) =>
-  //       prev.map((tab) => (tab.id === activeTabId ? { ...tab, messages: messages } : tab))
-  //     )
-  //   }
-  // }, [messages, activeTabId])
+    try {
+      const response = await fetch('/api/image-replicate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt,
+          parameters: {
+            genre: 'visual novel',
+            mood: 'intimate',
+          },
+        }),
+      })
 
+      if (!response.ok) {
+        throw new Error('Failed to generate image')
+      }
+
+      const data = await response.json()
+
+      console.log('Image generation response:', data)
+
+      // Update the loading image with the actual URL
+      setSlideshowImages((prev) =>
+        prev.map((img) =>
+          img.id === imageId ? { ...img, url: data.imageUrl, isLoading: false } : img
+        )
+      )
+    } catch (error) {
+      console.error('Failed to generate image:', error)
+      // Remove the failed loading image
+      setSlideshowImages((prev) => prev.filter((img) => img.id !== imageId))
+    }
+  }
+
+  // Slideshow management functions
+  const removeSlideshowImage = (imageId: string) => {
+    setSlideshowImages((prev) => prev.filter((img) => img.id !== imageId))
+  }
+
+  // Get current message and image for display
+  const currentMessage = messages[currentSlideIndex]
+  // For now, show the most recent image if there's no image at current index
+  const currentImage =
+    slideshowImages[currentSlideIndex] || slideshowImages[slideshowImages.length - 1]
   const isLoading = status === 'streaming'
-  const scrollViewRef = useRef<FlatList>(null)
 
-  // Prepare data for FlatList
-  const chatData = [...messages]
+  // Debug logging
+  console.log('Current slide index:', currentSlideIndex)
+  console.log('Messages length:', messages.length)
+  console.log('Slideshow images length:', slideshowImages.length)
+  console.log('Slideshow images:', slideshowImages)
+  console.log('Current image:', currentImage)
+  console.log('Current message:', currentMessage)
 
-  // // Add loading indicator as a special item if streaming
-  // if (isLoading) {
-  //   chatData.push({
-  //     id: 'loading',
-  //     role: 'assistant',
-  //     parts: [{ type: 'text', text: 'Thinking...' }],
-  //   })
-  // }
+  // Auto-advance to newest slide when new messages arrive
+  useEffect(() => {
+    if (messages.length > 0) {
+      setCurrentSlideIndex(messages.length - 1)
+    }
+  }, [messages.length])
 
-  const renderChatMessage = ({ item: message }: { item: any }) => {
-    const isLoadingMessage = message.id === 'loading'
+  // Auto-open custom input when no suggestions are available
+  useEffect(() => {
+    // Don't show input while AI is responding
+    if (isLoading) {
+      setShowCustomInput(false)
+      return
+    }
 
-    return (
-      <XStack
-        space="$3"
-        alignItems="flex-start"
-        justifyContent={message.role === 'user' ? 'flex-end' : 'flex-start'}
-        marginBottom="$3"
-      >
-        {message.role === 'assistant' && (
-          <YStack
-            backgroundColor="$blue5"
-            borderRadius="$10"
-            padding="$2"
-            alignItems="center"
-            justifyContent="center"
-          >
-            <Bot size={16} color="$blue11" />
-          </YStack>
-        )}
+    if (currentMessage && currentMessage.role === 'assistant') {
+      const messageText =
+        currentMessage.parts
+          ?.filter((p) => p.type === 'text')
+          .map((p) => (p as any).text)
+          .join('') || ''
 
-        <YStack
-          backgroundColor={message.role === 'user' ? '$blue9' : '$backgroundHover'}
-          borderRadius="$4"
-          padding="$3"
-          maxWidth="80%"
-          borderTopLeftRadius={message.role === 'user' ? '$4' : '$1'}
-          borderTopRightRadius={message.role === 'assistant' ? '$4' : '$1'}
-        >
-          {message.parts?.map((part: any, index: number) => (
-            <MessagePart key={index} part={part} index={index} />
-          ))}
-        </YStack>
+      const structuredContent = parseStructuredResponse(messageText)
 
-        {message.role === 'user' && (
-          <YStack
-            backgroundColor="$blue9"
-            borderRadius="$10"
-            padding="$2"
-            alignItems="center"
-            justifyContent="center"
-          >
-            <User size={16} color="white" />
-          </YStack>
-        )}
-      </XStack>
-    )
+      // Open custom input if no suggestions are available
+      const hasSuggestions =
+        structuredContent?.suggestions && structuredContent.suggestions.length > 0
+      setShowCustomInput(!hasSuggestions)
+    } else if (currentMessage && currentMessage.role === 'user') {
+      // Close custom input when showing user messages
+      setShowCustomInput(false)
+    } else if (!currentMessage) {
+      // Open custom input when no messages (initial state)
+      setShowCustomInput(true)
+    }
+  }, [currentMessage, isLoading])
+
+  // Handle suggestion click
+  const handleSuggestionClick = (suggestion: string) => {
+    setInput(suggestion)
+    // Auto-submit the suggestion
+    setTimeout(() => {
+      sendMessage({ text: suggestion })
+      setInput('')
+    }, 100)
   }
 
-  // Define wallpaper image URLs based on theme
-  const lightWallpaper =
-    'https://images.unsplash.com/photo-1557683316-973673baf926?w=1920&h=1080&fit=crop&crop=center'
-  const darkWallpaper =
-    'https://hdwallpapers4k.com/wp-content/uploads/2025/03/minimalist_dark_theme_wallpaper_ff8770f6.png.webp'
-  // 'https://t3.ftcdn.net/jpg/05/64/82/08/360_F_564820811_n9WP1mM43pLiQwLkIA07KF9Hat5vkX2v.jpg'
-  // 'https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=1920&h=1080&fit=crop&crop=center'
+  // Render the current message content
+  const renderMessageContent = (message: any) => {
+    if (!message) return null
 
-  const wallpaperUrl = colorScheme === 'dark' ? darkWallpaper : lightWallpaper
+    // Parse structured content for assistant messages
+    const structuredContent =
+      message.role === 'assistant' && message.parts?.length > 0
+        ? parseStructuredResponse(message.parts.map((p) => p.text).join(''))
+        : null
+
+    if (message.role === 'user') {
+      return (
+        <Text fontSize="$4" color="white" textAlign="center">
+          {message.parts?.[0]?.text || message.content}
+        </Text>
+      )
+    }
+
+    if (structuredContent) {
+      return (
+        <YStack gap="$3" alignItems="center">
+          {/* AI Response */}
+          {structuredContent.aiResponse && <MarkdownUI>{structuredContent.aiResponse}</MarkdownUI>}
+
+          {/* Stats */}
+          {structuredContent.stats && (
+            <YStack
+              gap="$2"
+              backgroundColor="rgba(255, 255, 255, 0.1)"
+              padding="$3"
+              borderRadius="$3"
+              width="100%"
+            >
+              <Text fontSize="$3" fontWeight="600" color="white" textAlign="center">
+                Current Status
+              </Text>
+              <XStack gap="$3" flexWrap="wrap" justifyContent="center">
+                {structuredContent.stats.sexPosition && (
+                  <Text fontSize="$2" color="rgba(255, 255, 255, 0.9)">
+                    Position: {structuredContent.stats.sexPosition}
+                  </Text>
+                )}
+                {structuredContent.stats.dressStatus && (
+                  <Text fontSize="$2" color="rgba(255, 255, 255, 0.9)">
+                    Dress: {structuredContent.stats.dressStatus}
+                  </Text>
+                )}
+                {structuredContent.stats.location && (
+                  <Text fontSize="$2" color="rgba(255, 255, 255, 0.9)">
+                    Location: {structuredContent.stats.location}
+                  </Text>
+                )}
+              </XStack>
+            </YStack>
+          )}
+
+          {/* Pleasure Rating */}
+          {typeof structuredContent.pleasureRating === 'number' && (
+            <XStack
+              alignItems="center"
+              gap="$2"
+              backgroundColor="rgba(220, 38, 38, 0.8)"
+              padding="$2"
+              borderRadius="$3"
+              width="100%"
+              justifyContent="center"
+            >
+              <Text fontSize="$3" fontWeight="600" color="white">
+                Pleasure:
+              </Text>
+              <Text fontSize="$3" color="white" fontWeight="600">
+                {structuredContent.pleasureRating}/100
+              </Text>
+            </XStack>
+          )}
+
+          {/* Suggestions as Buttons */}
+          {structuredContent.suggestions && structuredContent.suggestions.length > 0 && (
+            <YStack gap="$2" width="100%" alignItems="center">
+              <Text fontSize="$3" fontWeight="600" color="white" marginBottom="$1">
+                Suggestions:
+              </Text>
+              <XStack gap="$2" flexWrap="wrap" justifyContent="center">
+                {structuredContent.suggestions.map((suggestion: string, index: number) => (
+                  <Button
+                    key={index}
+                    size="$2"
+                    backgroundColor="$blue5"
+                    borderColor="$blue7"
+                    borderWidth={1}
+                    borderRadius="$3"
+                    paddingHorizontal="$3"
+                    paddingVertical="$2"
+                    onPress={() => handleSuggestionClick(suggestion)}
+                    hoverStyle={{ backgroundColor: '$blue6' }}
+                    pressStyle={{ scale: 0.95, backgroundColor: '$blue7' }}
+                  >
+                    <Text fontSize="$2" color="$blue12" textAlign="center">
+                      {suggestion}
+                    </Text>
+                  </Button>
+                ))}
+                {/* Custom Button */}
+                <Button
+                  size="$2"
+                  backgroundColor="$green5"
+                  borderColor="$green7"
+                  borderWidth={1}
+                  borderRadius="$3"
+                  paddingHorizontal="$3"
+                  paddingVertical="$2"
+                  onPress={() => setShowCustomInput(!showCustomInput)}
+                  hoverStyle={{ backgroundColor: '$green6' }}
+                  pressStyle={{ scale: 0.95, backgroundColor: '$green7' }}
+                >
+                  <Text fontSize="$2" color="$green12" textAlign="center">
+                    Custom
+                  </Text>
+                </Button>
+              </XStack>
+            </YStack>
+          )}
+        </YStack>
+      )
+    }
+
+    // Fallback to regular message display
+    return (
+      <Text fontSize="$4" color="white" textAlign="center">
+        {message.parts?.map((part: any) => part.text).join('') || message.content}
+      </Text>
+    )
+  }
 
   return (
-    <YStack flex={1} position="relative">
-      {/* Wallpaper Background */}
-      <Image
-        source={{ uri: wallpaperUrl }}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          width: '100%',
-          height: '100%',
-          zIndex: -1,
-        }}
-        resizeMode="cover"
-      />
-
-      {/* macOS-style Top Menu Bar */}
+    <YStack flex={1} backgroundColor="$background">
+      {/* Top Menu Bar */}
       <XStack
-        position="absolute"
-        top={0}
-        left={0}
-        right={0}
-        height={32}
-        backgroundColor={
-          colorScheme === 'dark' ? 'rgba(38, 38, 38, 0.85)' : 'rgba(242, 242, 242, 0.85)'
-        }
+        height={40}
+        backgroundColor={colorScheme === 'dark' ? '$color3' : '$color2'}
         paddingHorizontal="$3"
         alignItems="center"
         justifyContent="space-between"
-        zIndex={10}
         borderBottomWidth={1}
-        borderBottomColor={
-          colorScheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
-        }
-        {...(isWeb && {
-          style: {
-            backdropFilter: 'blur(50px)',
-            WebkitBackdropFilter: 'blur(50px)',
-          },
-        })}
+        borderBottomColor="$borderColor"
       >
-        {/* Left section */}
-        <XStack gap="$2" alignItems="center" flex={1}>
-          {/* Space Switcher Button */}
+        <Text fontSize="$3" fontWeight="600" color="$color12">
+          AI Visual Novel Chat
+        </Text>
+
+        <XStack gap="$2" alignItems="center">
           <Button
             size="$2"
-            backgroundColor="transparent"
-            borderWidth={0}
-            paddingHorizontal="$2"
-            paddingVertical="$1"
-            onPress={() => setShowSpaceSwitcher(true)}
-            hoverStyle={{
-              backgroundColor:
-                colorScheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-            }}
-            pressStyle={{ scale: 0.98 }}
+            backgroundColor="$green9"
+            color="white"
+            paddingHorizontal="$3"
+            onPress={testImageGeneration}
+            hoverStyle={{ backgroundColor: '$green10' }}
+          >
+            <Text fontSize="$2" color="white" fontWeight="500">
+              Test Image
+            </Text>
+          </Button>
+          <Button
+            size="$2"
+            backgroundColor={showDebugInfo ? '$red9' : '$gray9'}
+            color="white"
+            paddingHorizontal="$3"
+            onPress={() => setShowDebugInfo(!showDebugInfo)}
+            hoverStyle={{ backgroundColor: showDebugInfo ? '$red10' : '$gray10' }}
+          >
+            <Text fontSize="$2" color="white" fontWeight="500">
+              Debug
+            </Text>
+          </Button>
+          <Button
+            size="$2"
+            backgroundColor="$blue9"
+            color="white"
+            paddingHorizontal="$3"
+            onPress={() => router.push('/visual-novel')}
+            hoverStyle={{ backgroundColor: '$blue10' }}
           >
             <XStack gap="$1.5" alignItems="center">
-              <Grid3x3 size={14} color={colorScheme === 'dark' ? '$color11' : '$color12'} />
-              <Text
-                fontSize="$2"
-                color={colorScheme === 'dark' ? '$color11' : '$color12'}
-                fontWeight="500"
-              >
-                Spaces
+              <BookOpen size={14} color="white" />
+              <Text fontSize="$2" color="white" fontWeight="500">
+                Visual Novel
               </Text>
             </XStack>
           </Button>
-        </XStack>
-
-        {/* Center section - Active Space */}
-        <XStack gap="$2" alignItems="center">
-          <Button
-            size="$1"
-            circular
-            chromeless
-            icon={ChevronLeft}
-            disabled={spaces.findIndex((s) => s.id === activeSpaceId) === 0}
-            opacity={spaces.findIndex((s) => s.id === activeSpaceId) === 0 ? 0.3 : 1}
-            onPress={goToPreviousSpace}
-            scaleIcon={0.8}
-            paddingHorizontal="$1"
-            hoverStyle={{
-              backgroundColor:
-                colorScheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-            }}
-            aria-label="Previous Space (⌘←)"
-          />
-
-          <Text
-            fontSize="$2"
-            color={colorScheme === 'dark' ? '$color11' : '$color12'}
-            fontWeight="500"
-            minWidth={100}
-            textAlign="center"
-          >
-            {activeSpace.name}
-          </Text>
-
-          <Button
-            size="$1"
-            circular
-            chromeless
-            icon={ChevronRight}
-            disabled={spaces.findIndex((s) => s.id === activeSpaceId) === spaces.length - 1}
-            opacity={
-              spaces.findIndex((s) => s.id === activeSpaceId) === spaces.length - 1 ? 0.3 : 1
-            }
-            onPress={goToNextSpace}
-            scaleIcon={0.8}
-            paddingHorizontal="$1"
-            hoverStyle={{
-              backgroundColor:
-                colorScheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-            }}
-            aria-label="Next Space (⌘→)"
-          />
-        </XStack>
-
-        {/* Right section */}
-        <XStack gap="$2" alignItems="center" flex={1} justifyContent="flex-end">
-          <Text fontSize="$1" color={colorScheme === 'dark' ? '$color10' : '$color11'}>
-            {spaces.indexOf(activeSpace) + 1} of {spaces.length}
-          </Text>
+          <ThemeToggle size="$2" variant="minimal" />
         </XStack>
       </XStack>
 
-      {/* Space Switcher UI */}
-      <AnimatePresence>
-        {showSpaceSwitcher && (
+      {/* Full Screen Image Background */}
+      <YStack height="calc(100vh - 40px)" position="relative">
+        {/* Debug Info */}
+        {showDebugInfo && (
+          <YStack
+            position="absolute"
+            top="$10"
+            left="$4"
+            zIndex={20}
+            backgroundColor="rgba(0,0,0,0.8)"
+            padding="$2"
+            borderRadius="$2"
+            borderWidth={1}
+            borderColor="rgba(255, 255, 255, 0.2)"
+          >
+            {/* Close button */}
+            <Button
+              size="$1"
+              circular
+              chromeless
+              icon={X}
+              position="absolute"
+              top="$1"
+              right="$1"
+              onPress={() => setShowDebugInfo(false)}
+              backgroundColor="rgba(255, 255, 255, 0.2)"
+              color="white"
+              hoverStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.3)' }}
+              pressStyle={{ scale: 0.95 }}
+            />
+
+            <Text color="white" fontSize="$2" fontWeight="600" marginBottom="$1">
+              Debug Info
+            </Text>
+            <Text color="white" fontSize="$1">
+              Slide Index: {currentSlideIndex}
+            </Text>
+            <Text color="white" fontSize="$1">
+              Images: {slideshowImages.length}
+            </Text>
+            <Text color="white" fontSize="$1">
+              Messages: {messages.length}
+            </Text>
+            <Text color="white" fontSize="$1">
+              Current Image: {currentImage ? 'Yes' : 'No'}
+            </Text>
+            <Text color="white" fontSize="$1">
+              Image URL: {currentImage?.url ? 'Yes' : 'None'}
+            </Text>
+            <Text color="white" fontSize="$1">
+              Is Loading: {currentImage?.isLoading ? 'Yes' : 'No'}
+            </Text>
+          </YStack>
+        )}
+
+        {/* Background Image */}
+        {slideshowImages.length > 0 ? (
           <YStack
             position="absolute"
             top={0}
             left={0}
             right={0}
             bottom={0}
-            backgroundColor="rgba(0, 0, 0, 0.8)"
-            zIndex={100}
-            animation="quick"
-            enterStyle={{ opacity: 0 }}
-            exitStyle={{ opacity: 0 }}
-            onPress={() => setShowSpaceSwitcher(false)}
+            alignItems="center"
+            justifyContent="center"
           >
-            <Center flex={1} padding="$4">
-              <YStack gap="$4" alignItems="center">
-                <Text fontSize="$8" fontWeight="600" color="white">
-                  Spaces
+            {!currentImage ? (
+              <YStack alignItems="center" gap="$3">
+                <Text fontSize="$4" color="white">
+                  No image at current slide index {currentSlideIndex}
                 </Text>
-
-                {/* Space Grid */}
-                <XStack gap="$4" flexWrap="wrap" justifyContent="center">
-                  {spaces.map((space, index) => (
-                    <YStack
-                      key={space.id}
-                      backgroundColor={space.id === activeSpaceId ? '$blue9' : '$backgroundHover'}
-                      borderRadius="$4"
-                      padding="$3"
-                      width={200}
-                      height={150}
-                      borderWidth={space.id === activeSpaceId ? 2 : 1}
-                      borderColor={space.id === activeSpaceId ? '$blue11' : '$borderColor'}
-                      animation="bouncy"
-                      hoverStyle={{ scale: 1.05 }}
-                      pressStyle={{ scale: 0.95 }}
-                      onPress={() => switchSpace(space.id)}
-                      position="relative"
-                      overflow="hidden"
-                    >
-                      {/* Space Preview */}
-                      <YStack flex={1} alignItems="center" justifyContent="center">
-                        <Monitor size={40} color="$color10" />
-                        <Text fontSize="$5" fontWeight="500" marginTop="$2">
-                          {space.name}
-                        </Text>
-                        <Text fontSize="$2" color="$color10" marginTop="$1">
-                          {space.iframeWindows.length} window
-                          {space.iframeWindows.length !== 1 ? 's' : ''}
-                        </Text>
-                      </YStack>
-
-                      {/* Keyboard shortcut hint */}
-                      <Text
-                        position="absolute"
-                        top="$2"
-                        left="$2"
-                        fontSize="$2"
-                        color="$color11"
-                        backgroundColor="$background"
-                        paddingHorizontal="$1.5"
-                        paddingVertical="$0.5"
-                        borderRadius="$2"
-                      >
-                        ⌘{index + 1}
-                      </Text>
-
-                      {/* Close button */}
-                      {spaces.length > 1 && (
-                        <Button
-                          size="$2"
-                          circular
-                          chromeless
-                          icon={X}
-                          position="absolute"
-                          top="$2"
-                          right="$2"
-                          onPress={(e) => {
-                            e.stopPropagation()
-                            closeSpace(space.id)
-                          }}
-                          backgroundColor="$red5"
-                          hoverStyle={{ backgroundColor: '$red6' }}
-                          pressStyle={{ scale: 0.9 }}
-                        />
-                      )}
-                    </YStack>
-                  ))}
-
-                  {/* Add New Space Button */}
-                  <YStack
-                    backgroundColor="$backgroundHover"
-                    borderRadius="$4"
-                    padding="$3"
-                    width={200}
-                    height={150}
-                    borderWidth={1}
-                    borderColor="$borderColor"
-                    borderStyle="dashed"
-                    animation="bouncy"
-                    hoverStyle={{ scale: 1.05, backgroundColor: '$color3' }}
-                    pressStyle={{ scale: 0.95 }}
-                    onPress={createNewSpace}
-                    alignItems="center"
-                    justifyContent="center"
-                  >
-                    <Plus size={40} color="$color10" />
-                    <Text fontSize="$4" color="$color10" marginTop="$2">
-                      New Space
-                    </Text>
-                  </YStack>
-                </XStack>
-
-                {/* Instructions */}
-                <YStack gap="$2" alignItems="center" marginTop="$4">
-                  <Text fontSize="$3" color="$color11">
-                    Press ⌘← or ⌘→ to switch spaces
-                  </Text>
-                  <Text fontSize="$3" color="$color11">
-                    Press F3 or ⌘↑ to open space switcher
-                  </Text>
-                </YStack>
+                <Text fontSize="$2" color="rgba(255, 255, 255, 0.8)">
+                  Available images:{' '}
+                  {slideshowImages
+                    .map((img, i) => `${i}: ${img.url ? 'URL' : 'No URL'}`)
+                    .join(', ')}
+                </Text>
               </YStack>
-            </Center>
+            ) : currentImage.isLoading ? (
+              <YStack alignItems="center" gap="$3">
+                <Text fontSize="$4" color="white">
+                  Generating image...
+                </Text>
+                <Text
+                  fontSize="$2"
+                  color="rgba(255, 255, 255, 0.8)"
+                  textAlign="center"
+                  maxWidth={300}
+                >
+                  {currentImage.prompt}
+                </Text>
+              </YStack>
+            ) : currentImage.url ? (
+              <>
+                {typeof window !== 'undefined' ? (
+                  <img
+                    src={currentImage.url}
+                    alt={currentImage.prompt}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                    }}
+                  />
+                ) : (
+                  <Image
+                    source={{ uri: currentImage.url }}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      resizeMode: 'cover',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                    }}
+                  />
+                )}
+              </>
+            ) : (
+              <Text color="white">Failed to load image</Text>
+            )}
+          </YStack>
+        ) : (
+          <YStack
+            position="absolute"
+            top={0}
+            left={0}
+            right={0}
+            bottom={0}
+            backgroundColor="$color2"
+            alignItems="center"
+            justifyContent="center"
+          >
+            <Text fontSize="$5" color="$color10" textAlign="center">
+              AI Generated Images
+            </Text>
+            <Text fontSize="$3" color="$color9" textAlign="center" marginTop="$2">
+              Images will appear here as the AI generates them
+            </Text>
           </YStack>
         )}
-      </AnimatePresence>
 
-      {/* Iframe windows - positioned behind chat */}
-      <AnimatePresence>
-        <YStack
-          key={activeSpaceId}
-          animation="quick"
-          enterStyle={{ opacity: 0 }}
-          exitStyle={{ opacity: 0 }}
-        >
-          {activeSpace.iframeWindows.map((iframe) => (
-            <YStack
-              key={iframe.id}
-              animation="quick"
-              enterStyle={{ opacity: 0, scale: 0.95 }}
-              exitStyle={{ opacity: 0, scale: 0.95 }}
-            >
-              <DraggableIframe
-                id={iframe.id}
-                filename={iframe.filename}
-                content={iframe.content}
-                title={iframe.title}
-                width={iframe.width}
-                height={iframe.height}
-                initialPosition={iframe.position}
-                onClose={closeIframeWindow}
-              />
-            </YStack>
-          ))}
-        </YStack>
-      </AnimatePresence>
-
-      {/* Background overlay when messages are visible */}
-      {isMessagesVisible && (
+        {/* Dark Overlay for Better Text Readability */}
         <YStack
           position="absolute"
           top={0}
           left={0}
           right={0}
           bottom={0}
-          // backgroundColor="rgba(0, 0, 0, 0.3)"
-          zIndex={1}
-          onPress={() => setIsMessagesVisible(false)}
+          backgroundColor="rgba(0, 0, 0, 0.3)"
         />
-      )}
 
-      {/* Absolute positioned container for both messages and input */}
-      <Center
-        position="absolute"
-        bottom={isFullscreen ? 0 : '$4'}
-        left={0}
-        right={0}
-        top={isFullscreen ? 0 : undefined}
-        paddingHorizontal={isFullscreen ? '$2' : '$4'}
-        paddingVertical={isFullscreen ? '$2' : undefined}
-        zIndex={2}
-      >
-        <YStack
-          width="100%"
-          maxWidth={isFullscreen ? undefined : 500}
-          height={isFullscreen ? '100%' : undefined}
-          gap="$3"
-          animation="quick"
-        >
-          {/* Messages Window */}
-          <AnimatePresence>
-            {isMessagesVisible && (
+        {/* Slide Navigation */}
+        {(messages.length > 1 || slideshowImages.length > 1) && (
+          <XStack
+            position="absolute"
+            top="$4"
+            left="50%"
+            transform={[{ translateX: -50 }]}
+            justifyContent="center"
+            alignItems="center"
+            zIndex={10}
+            gap="$3"
+          >
+            <Button
+              size="$2"
+              circular
+              icon={ChevronLeft}
+              onPress={goToPreviousSlide}
+              disabled={currentSlideIndex === 0}
+              backgroundColor="rgba(0, 0, 0, 0.6)"
+              color="white"
+              borderColor="rgba(255, 255, 255, 0.3)"
+              borderWidth={1}
+              opacity={currentSlideIndex === 0 ? 0.5 : 1}
+            />
+
+            <Text
+              fontSize="$2"
+              color="white"
+              backgroundColor="rgba(0, 0, 0, 0.6)"
+              padding="$1"
+              paddingHorizontal="$2"
+              borderRadius="$2"
+              borderColor="rgba(255, 255, 255, 0.3)"
+              borderWidth={1}
+            >
+              {currentSlideIndex + 1} / {Math.max(messages.length, slideshowImages.length)}
+            </Text>
+
+            <Button
+              size="$2"
+              circular
+              icon={ChevronRight}
+              onPress={goToNextSlide}
+              disabled={
+                currentSlideIndex >= Math.max(messages.length - 1, slideshowImages.length - 1)
+              }
+              backgroundColor="rgba(0, 0, 0, 0.6)"
+              color="white"
+              borderColor="rgba(255, 255, 255, 0.3)"
+              borderWidth={1}
+              opacity={
+                currentSlideIndex >= Math.max(messages.length - 1, slideshowImages.length - 1)
+                  ? 0.5
+                  : 1
+              }
+            />
+          </XStack>
+        )}
+
+        {/* Stats Panel - Top Right */}
+        {currentMessage &&
+          (() => {
+            const structuredContent =
+              currentMessage.role === 'assistant' && currentMessage.parts?.length > 0
+                ? parseStructuredResponse(
+                    currentMessage.parts
+                      .filter((p) => p.type === 'text')
+                      .map((p) => (p as any).text)
+                      .join('')
+                  )
+                : null
+
+            return structuredContent?.stats ||
+              typeof structuredContent?.pleasureRating === 'number' ? (
               <YStack
-                key="messages"
-                height={isFullscreen ? undefined : 500}
-                flex={isFullscreen ? 1 : undefined}
-                borderRadius="$6"
-                borderWidth={1}
-                borderColor="rgba(255, 255, 255, 0.2)"
-                backgroundColor="rgba(255, 255, 255, 0.1)"
-                shadowColor="$shadowColor"
-                shadowOffset={{ width: 0, height: 8 }}
-                shadowOpacity={0.15}
-                shadowRadius={24}
-                elevation={8}
-                paddingHorizontal="$4"
-                paddingTop="$4"
-                paddingBottom="$2"
-                animation="bouncy"
-                enterStyle={{
-                  opacity: 0,
-                  scale: 0.95,
-                  y: 20,
-                }}
-                exitStyle={{
-                  opacity: 0,
-                  scale: 0.95,
-                  y: 20,
-                }}
-                {...(isWeb && {
-                  style: {
-                    backdropFilter: 'blur(20px)',
-                    WebkitBackdropFilter: 'blur(20px)',
-                    backgroundColor:
-                      colorScheme === 'dark' ? 'rgba(0, 0, 0, 0.3)' : 'rgba(255, 255, 255, 0.3)',
-                    borderColor:
-                      colorScheme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-                  },
-                })}
+                position="absolute"
+                top="$4"
+                right="$4"
+                gap="$2"
+                zIndex={10}
+                alignItems="flex-end"
               >
-                {/* Header with Chat Tabs and Close Button */}
-                <XStack justifyContent="space-between" alignItems="center" marginBottom="$2">
-                  {/* Chat Tabs */}
-                  <XStack gap="$1" flex={1} overflow="hidden">
-                    {chatTabs.map((tab) => (
-                      <XStack
-                        key={tab.id}
-                        backgroundColor={activeTabId === tab.id ? '$blue5' : '$color3'}
-                        borderRadius="$3"
-                        paddingHorizontal="$2"
-                        paddingVertical="$1"
-                        alignItems="center"
-                        gap="$1"
-                        maxWidth={120}
-                        minWidth={80}
-                        borderWidth={1}
-                        borderColor={activeTabId === tab.id ? '$blue7' : '$color6'}
-                        hoverStyle={{
-                          backgroundColor: activeTabId === tab.id ? '$blue6' : '$color4',
-                        }}
-                        pressStyle={{ scale: 0.98 }}
-                        onPress={() => switchTab(tab.id)}
-                      >
-                        <Text
-                          fontSize="$2"
-                          color={activeTabId === tab.id ? '$blue12' : '$color11'}
-                          numberOfLines={1}
-                          flex={1}
-                        >
-                          {tab.title}
+                {/* Stats */}
+                {structuredContent.stats && (
+                  <YStack
+                    gap="$2"
+                    backgroundColor="rgba(0, 0, 0, 0.7)"
+                    padding="$3"
+                    borderRadius="$3"
+                    borderColor="rgba(255, 255, 255, 0.3)"
+                    borderWidth={1}
+                    {...(isWeb && {
+                      style: {
+                        backdropFilter: 'blur(10px)',
+                        WebkitBackdropFilter: 'blur(10px)',
+                      },
+                    })}
+                  >
+                    <Text fontSize="$2" fontWeight="600" color="white" textAlign="center">
+                      Status
+                    </Text>
+                    <YStack gap="$1">
+                      {structuredContent.stats.sexPosition && (
+                        <Text fontSize="$1" color="rgba(255, 255, 255, 0.9)">
+                          Position: {structuredContent.stats.sexPosition}
                         </Text>
-                        {chatTabs.length > 1 && (
-                          <Button
-                            size="$1"
-                            circular
-                            chromeless
-                            icon={X}
-                            onPress={(e) => {
-                              e.stopPropagation()
-                              closeTab(tab.id)
-                            }}
-                            padding="$0.5"
-                            minWidth={16}
-                            minHeight={16}
-                            hoverStyle={{ backgroundColor: '$red5' }}
-                            pressStyle={{ scale: 0.9 }}
-                          />
-                        )}
-                      </XStack>
-                    ))}
+                      )}
+                      {structuredContent.stats.dressStatus && (
+                        <Text fontSize="$1" color="rgba(255, 255, 255, 0.9)">
+                          Dress: {structuredContent.stats.dressStatus}
+                        </Text>
+                      )}
+                      {structuredContent.stats.location && (
+                        <Text fontSize="$1" color="rgba(255, 255, 255, 0.9)">
+                          Location: {structuredContent.stats.location}
+                        </Text>
+                      )}
+                    </YStack>
+                  </YStack>
+                )}
 
-                    {/* Add New Tab Button */}
-                    <Button
-                      size="$2"
-                      circular
-                      chromeless
-                      icon={Plus}
-                      onPress={createNewTab}
-                      backgroundColor="$color3"
-                      borderWidth={1}
-                      borderColor="$color6"
-                      hoverStyle={{ backgroundColor: '$color4' }}
-                      pressStyle={{ scale: 0.95 }}
-                    />
+                {/* Pleasure Rating */}
+                {typeof structuredContent?.pleasureRating === 'number' && (
+                  <XStack
+                    alignItems="center"
+                    gap="$2"
+                    backgroundColor="rgba(220, 38, 38, 0.8)"
+                    padding="$2"
+                    borderRadius="$3"
+                    borderColor="rgba(255, 255, 255, 0.3)"
+                    borderWidth={1}
+                    {...(isWeb && {
+                      style: {
+                        backdropFilter: 'blur(10px)',
+                        WebkitBackdropFilter: 'blur(10px)',
+                      },
+                    })}
+                  >
+                    <Text fontSize="$2" fontWeight="600" color="white">
+                      Pleasure: {structuredContent.pleasureRating}/100
+                    </Text>
                   </XStack>
-
-                  {/* Fullscreen and Close Buttons */}
-                  <XStack gap="$2">
-                    <Button
-                      size="$3"
-                      circular
-                      chromeless
-                      icon={isFullscreen ? Minimize2 : Maximize2}
-                      onPress={toggleFullscreen}
-                      hoverStyle={{ backgroundColor: '$color5' }}
-                      pressStyle={{ scale: 0.95 }}
-                    />
-                    <Button
-                      size="$3"
-                      circular
-                      chromeless
-                      icon={X}
-                      onPress={() => {
-                        setIsMessagesVisible(false)
-                        setIsFullscreen(false)
-                      }}
-                      hoverStyle={{ backgroundColor: '$color5' }}
-                      pressStyle={{ scale: 0.95 }}
-                    />
-                  </XStack>
-                </XStack>
-
-                {/* Chat Content */}
-                <FlatList
-                  ref={scrollViewRef}
-                  data={chatData}
-                  renderItem={renderChatMessage}
-                  keyExtractor={(item) => item.id}
-                  inverted={false}
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingBottom: 10 }}
-                  onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
-                  ListEmptyComponent={
-                    <Center flex={1} paddingVertical="$8">
-                      <Bot size={48} color="$color10" />
-                      <Text color="$color10" fontSize="$5" marginTop="$2" textAlign="center">
-                        Start a conversation with the AI assistant
-                      </Text>
-                    </Center>
-                  }
-                />
+                )}
               </YStack>
-            )}
-          </AnimatePresence>
+            ) : null
+          })()}
+
+        {/* Combined Bottom Container - Message Text, Suggestions, and Chat Input */}
+        <YStack
+          position="absolute"
+          bottom="$6"
+          left="$4"
+          right="$4"
+          alignItems="center"
+          zIndex={10}
+          gap="$3"
+        >
+          {/* Suggestion Buttons */}
+          {currentMessage &&
+            (() => {
+              const structuredContent =
+                currentMessage.role === 'assistant' && currentMessage.parts?.length > 0
+                  ? parseStructuredResponse(
+                      currentMessage.parts
+                        .filter((p) => p.type === 'text')
+                        .map((p) => (p as any).text)
+                        .join('')
+                    )
+                  : null
+
+              return structuredContent?.suggestions && structuredContent.suggestions.length > 0 ? (
+                <YStack gap="$2" width="100%" alignItems="flex-start" paddingLeft="$4">
+                  {structuredContent.suggestions.map((suggestion: string, index: number) => (
+                    <Button
+                      key={index}
+                      size="$2"
+                      backgroundColor="transparent"
+                      borderColor="rgba(255, 255, 255, 0.3)"
+                      borderWidth={1}
+                      borderRadius="$3"
+                      paddingHorizontal="$3"
+                      paddingVertical="$2"
+                      onPress={() => handleSuggestionClick(suggestion)}
+                      hoverStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.1)' }}
+                      pressStyle={{ scale: 0.95 }}
+                      alignSelf="flex-start"
+                    >
+                      <Text fontSize="$2" color="white" textAlign="left">
+                        {suggestion}
+                      </Text>
+                    </Button>
+                  ))}
+                  {/* Custom Button */}
+                  <Button
+                    size="$2"
+                    backgroundColor="transparent"
+                    borderColor="rgba(255, 255, 255, 0.3)"
+                    borderWidth={1}
+                    borderRadius="$3"
+                    paddingHorizontal="$3"
+                    paddingVertical="$2"
+                    onPress={() => setShowCustomInput(!showCustomInput)}
+                    hoverStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.1)' }}
+                    pressStyle={{ scale: 0.95 }}
+                    alignSelf="flex-start"
+                  >
+                    <Text fontSize="$2" color="white" textAlign="left">
+                      Custom
+                    </Text>
+                  </Button>
+                </YStack>
+              ) : null
+            })()}
 
           {/* Chat Input */}
-          <YStack
-            borderRadius="$6"
-            borderWidth={1}
-            borderColor="rgba(255, 255, 255, 0.2)"
-            shadowColor="$shadowColor"
-            shadowOffset={{ width: 0, height: isMessagesVisible ? 8 : 4 }}
-            shadowOpacity={isMessagesVisible ? 0.2 : 0.1}
-            shadowRadius={isMessagesVisible ? 16 : 12}
-            elevation={isMessagesVisible ? 8 : 4}
-            width={isFullscreen ? '100%' : isMessagesVisible ? 500 : 200}
-            padding="$0.5"
-            animation="bouncy"
-            m="auto"
-            scale={isMessagesVisible ? 1.02 : 1}
-            style={{
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              position: 'relative',
-              overflow: 'visible',
-            }}
-            height={isMessagesVisible ? undefined : 45}
-            // Add glow effect when messages are not visible
-            {...(!isMessagesVisible && {
-              borderColor: '$blue7',
-              style: {
-                ...(!isMessagesVisible && {
-                  backdropFilter: 'blur(20px)',
-                  WebkitBackdropFilter: 'blur(20px)',
-                  position: 'relative',
-                  overflow: 'visible',
-                  boxShadow: `0 0 20px rgba(59, 130, 246, 0.3), 0 0 40px rgba(59, 130, 246, 0.1)`,
-                }),
-              },
-            })}
-          >
-            <ChatInput
-              placeholder={isMessagesVisible ? 'Ask me anything...' : 'Ready...'}
-              input={activeTab.input}
-              setInput={updateTabInput}
-              isLoading={isLoading}
-              onSubmit={handleSubmit}
-              allFilesUploaded={true}
-              stopHandler={() => {}}
-              onFocus={() => setIsMessagesVisible(true)}
-              onBlur={() => {
-                // Don't hide messages on blur - they stay visible
-              }}
-              isMessagesVisible={isMessagesVisible}
-              isFullscreen={isFullscreen}
-            />
-          </YStack>
+          {showCustomInput && !isLoading && (
+            <YStack
+              width="100%"
+              maxWidth={400}
+              backgroundColor="rgba(0, 0, 0, 0.8)"
+              borderRadius="$3"
+              borderWidth={1}
+              borderColor="rgba(255, 255, 255, 0.3)"
+              alignSelf="center"
+              {...(isWeb && {
+                style: {
+                  backdropFilter: 'blur(10px)',
+                  WebkitBackdropFilter: 'blur(10px)',
+                },
+              })}
+            >
+              {/* Close Button */}
+              <Button
+                size="$2"
+                circular
+                chromeless
+                icon={X}
+                position="absolute"
+                top="$1"
+                right="$1"
+                zIndex={10}
+                onPress={() => setShowCustomInput(false)}
+                backgroundColor="rgba(255, 255, 255, 0.2)"
+                color="white"
+                hoverStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.3)' }}
+                pressStyle={{ scale: 0.95 }}
+              />
+
+              <ChatInput
+                placeholder="Type your custom message..."
+                input={input}
+                setInput={setInput}
+                isLoading={isLoading}
+                onSubmit={(e) => {
+                  handleSubmit(e)
+                  setShowCustomInput(false)
+                }}
+                allFilesUploaded={true}
+                stopHandler={() => {}}
+                isMessagesVisible={true}
+                isFullscreen={false}
+              />
+            </YStack>
+          )}
+
+          {/* Message Text Container */}
+          {currentMessage ? (
+            <YStack gap="$2" alignItems="flex-start" width="100%">
+              {/* Character indicator */}
+              <XStack alignItems="center" gap="$2" alignSelf="flex-start" paddingLeft="$4">
+                {currentMessage.role === 'assistant' ? (
+                  <Bot size={20} color="white" />
+                ) : (
+                  <User size={20} color="white" />
+                )}
+                <Text fontSize="$3" fontWeight="600" color="white">
+                  {currentMessage.role === 'assistant' ? 'AI Assistant' : 'You'}
+                </Text>
+              </XStack>
+
+              {/* Message text with fixed height */}
+              <YStack
+                backgroundColor="transparent"
+                borderRadius="$4"
+                width="100%"
+                maxHeight={300}
+                paddingLeft="$4"
+              >
+                <ScrollView
+                  style={{ maxHeight: 300 }}
+                  contentContainerStyle={{
+                    padding: 16,
+                    alignItems: 'flex-start',
+                    justifyContent: 'flex-start',
+                    minHeight: 150,
+                  }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {currentMessage.role === 'user' ? (
+                    <Text fontSize="$4" color="white" textAlign="left">
+                      {currentMessage.parts
+                        ?.filter((p) => p.type === 'text')
+                        .map((p) => (p as any).text)
+                        .join('') || 'User message'}
+                    </Text>
+                  ) : (
+                    (() => {
+                      const structuredContent =
+                        currentMessage.parts?.length > 0
+                          ? parseStructuredResponse(
+                              currentMessage.parts
+                                .filter((p) => p.type === 'text')
+                                .map((p) => (p as any).text)
+                                .join('')
+                            )
+                          : null
+
+                      if (structuredContent?.aiResponse) {
+                        return (
+                          <YStack
+                            width="100%"
+                            {...(isWeb && {
+                              style: {
+                                color: 'white !important',
+                                '& *': {
+                                  color: 'white !important',
+                                },
+                              },
+                            })}
+                          >
+                            <MarkdownUI>{structuredContent.aiResponse}</MarkdownUI>
+                          </YStack>
+                        )
+                      }
+
+                      return (
+                        <Text fontSize="$4" color="white" textAlign="left">
+                          {currentMessage.parts
+                            ?.filter((p) => p.type === 'text')
+                            .map((p) => (p as any).text)
+                            .join('') || 'AI response'}
+                        </Text>
+                      )
+                    })()
+                  )}
+                </ScrollView>
+              </YStack>
+            </YStack>
+          ) : (
+            <YStack
+              alignItems="flex-start"
+              backgroundColor="transparent"
+              borderRadius="$4"
+              padding="$4"
+              width="100%"
+              height={150}
+              paddingLeft="$4"
+            >
+              <Bot size={48} color="white" />
+              <Text color="white" fontSize="$5" marginTop="$2" textAlign="left">
+                Start a conversation with the AI assistant
+              </Text>
+            </YStack>
+          )}
         </YStack>
-      </Center>
+      </YStack>
     </YStack>
   )
 }
