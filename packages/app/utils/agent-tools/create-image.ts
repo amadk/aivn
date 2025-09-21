@@ -72,7 +72,7 @@ export const createImageTool = {
         },
       })
 
-      console.log('image', image)
+      // console.log('image', image)
 
       console.log('Generated image successfully with Flux 1.1 Pro')
 
